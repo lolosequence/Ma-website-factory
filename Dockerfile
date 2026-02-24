@@ -4,7 +4,7 @@ FROM node:22-alpine AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
-COPY package.json package-lock.json* ./
+COPY .npmrc package.json package-lock.json* ./
 RUN npm ci
 
 # ─── Stage 2 : Build ──────────────────────────────────────────────────────────
