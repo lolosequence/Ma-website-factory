@@ -1,43 +1,29 @@
-version: '3'
+# docker-compose.yml — Développement local uniquement
+# Lance uniquement la base de données PostgreSQL.
+# L'application Next.js/Payload tourne en dehors de Docker (npm run dev).
+#
+# Usage :
+#   docker compose up -d        # démarrer Postgres
+#   docker compose down         # arrêter
+#   docker compose down -v      # arrêter + supprimer les données
 
 services:
-  payload:
-    image: node:18-alpine
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-payload}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-payload}
+      POSTGRES_DB: ${POSTGRES_DB:-payload}
     ports:
-      - '3000:3000'
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - .:/home/node/app
-      - node_modules:/home/node/app/node_modules
-    working_dir: /home/node/app/
-    command: sh -c "corepack enable && corepack prepare pnpm@latest --activate && pnpm install && pnpm dev"
-    depends_on:
-      - mongo
-      # - postgres
-    env_file:
-      - .env
-
-  # Ensure your DATABASE_URL uses 'mongo' as the hostname ie. mongodb://mongo/my-db-name
-  mongo:
-    image: mongo:latest
-    ports:
-      - '27017:27017'
-    command:
-      - --storageEngine=wiredTiger
-    volumes:
-      - data:/data/db
-    logging:
-      driver: none
-
-  # Uncomment the following to use postgres
-  # postgres:
-  #   restart: always
-  #   image: postgres:latest
-  #   volumes:
-  #     - pgdata:/var/lib/postgresql/data
-  #   ports:
-  #     - "5432:5432"
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-payload} -d ${POSTGRES_DB:-payload}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
-  data:
-  # pgdata:
-  node_modules:
+  pgdata:
