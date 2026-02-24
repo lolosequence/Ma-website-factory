@@ -42,28 +42,23 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
-
 # node_modules production (contient payload pour les migrations)
-COPY --from=prod-deps --chown=nextjs:nodejs /app/node_modules ./node_modules
+COPY --from=prod-deps /app/node_modules ./node_modules
 
 # Build Next.js compilé
-COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next
+COPY --from=builder /app/.next ./.next
 
 # Source Payload (requis par payload migrate pour charger la config TypeScript)
-COPY --from=builder --chown=nextjs:nodejs /app/src ./src
+COPY --from=builder /app/src ./src
 
 # Fichiers de config
-COPY --from=builder --chown=nextjs:nodejs /app/package.json ./package.json
-COPY --from=builder --chown=nextjs:nodejs /app/next.config.mjs ./next.config.mjs
-COPY --from=builder --chown=nextjs:nodejs /app/tsconfig.json ./tsconfig.json
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/next.config.mjs ./next.config.mjs
+COPY --from=builder /app/tsconfig.json ./tsconfig.json
 
 # Assets publics
-RUN mkdir -p ./public/media && chown nextjs:nodejs ./public/media
-COPY --from=builder --chown=nextjs:nodejs /app/public ./public
-
-USER nextjs
+RUN mkdir -p ./public/media
+COPY --from=builder /app/public ./public
 
 EXPOSE 3000
 ENV PORT=3000
