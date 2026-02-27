@@ -4,6 +4,10 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   deploy-preview:
     name: Deploy Preview to Vercel
@@ -36,7 +40,7 @@ jobs:
       - name: Deploy to Vercel preview
         id: deploy
         run: |
-          URL=$(vercel deploy --token=$VERCEL_TOKEN 2>&1 | tail -1)
+          URL=$(vercel deploy --token=$VERCEL_TOKEN 2>&1 | grep -E "^https://" | tail -1)
           echo "url=$URL" >> $GITHUB_OUTPUT
 
       - name: Comment PR with preview URL
