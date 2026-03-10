@@ -136,19 +136,19 @@ async function getOrCreateProject(projectName, config) {
   const projects = await dokployApi('project.all', 'GET', null, config)
   const existing = projects.find(p => p.name === projectName)
   if (existing) {
+    const environmentId = existing.environments?.[0]?.environmentId
+    if (!environmentId) throw new Error(`Aucun environment trouvé dans le projet "${projectName}"`)
     info(`Projet "${projectName}" trouvé (${existing.projectId})`)
-    return existing
+    return { projectId: existing.projectId, environmentId }
   }
   log('📁', `Création du projet "${projectName}"...`)
-  const project = await dokployApi('project.create', 'POST', { name: projectName, description: 'Sites clients' }, config)
-  ok(`Projet créé : ${project.projectId}`)
-  return project
-}
-
-async function getEnvironmentId(projectId, config) {
-  const environments = await dokployApi(`environment.byProjectId?projectId=${projectId}`, 'GET', null, config)
-  if (!environments?.length) throw new Error(`Aucun environment trouvé pour le projet ${projectId}`)
-  return environments[0].environmentId
+  // project.create retourne { project: { projectId, ... }, environment: { environmentId, ... } }
+  const data = await dokployApi('project.create', 'POST', { name: projectName, description: 'Sites clients' }, config)
+  const projectId = data.project?.projectId || data.projectId
+  const environmentId = data.environment?.environmentId
+  if (!projectId || !environmentId) throw new Error(`Réponse inattendue de project.create : ${JSON.stringify(data)}`)
+  ok(`Projet créé : ${projectId}`)
+  return { projectId, environmentId }
 }
 
 async function createPostgres(name, environmentId, config) {
@@ -157,6 +157,25 @@ async function createPostgres(name, environmentId, config) {
   const dbUser = `${dbName}_user`
   const dbPassword = generatePassword()
   const appName = `${slug}-postgres`
+
+  // Vérifier si Postgres existe déjà
+  const projects = await dokployApi('project.all', 'GET', null, config)
+  for (const project of projects) {
+    for (const env of project.environments || []) {
+      const existing = (env.postgres || []).find(p => p.appName === appName)
+      if (existing) {
+        warn(`PostgreSQL "${appName}" déjà existant (${existing.postgresId}) → on continue`)
+        return {
+          postgresId: existing.postgresId,
+          appName,
+          databaseName: existing.databaseName,
+          databaseUser: existing.databaseUser,
+          databasePassword: existing.databasePassword,
+          internalUrl: `postgresql://${existing.databaseUser}:${existing.databasePassword}@${appName}:5432/${existing.databaseName}`,
+        }
+      }
+    }
+  }
 
   log('🐘', `Création PostgreSQL "${appName}"...`)
   const pg = await dokployApi('postgres.create', 'POST', {
@@ -205,11 +224,19 @@ async function getGithubProviderId(config) {
 }
 
 async function createApplication(name, environmentId, config) {
+  // Vérifier si l'application existe déjà dans cet environment
+  const projects = await dokployApi('project.all', 'GET', null, config)
+  for (const project of projects) {
+    for (const env of project.environments || []) {
+      const existing = (env.applications || []).find(a => a.name === name)
+      if (existing) {
+        warn(`Application "${name}" déjà existante (${existing.applicationId}) → on continue`)
+        return existing
+      }
+    }
+  }
   log('🚀', `Création de l'application "${name}"...`)
-  const app = await dokployApi('application.create', 'POST', {
-    name,
-    environmentId,
-  }, config)
+  const app = await dokployApi('application.create', 'POST', { name, environmentId }, config)
   ok(`Application créée : ${app.applicationId}`)
   return app
 }
@@ -234,6 +261,8 @@ async function configureBuild(applicationId, config) {
     buildType: 'dockerfile',
     dockerfile: '/Dockerfile',
     buildPath: '/',
+    dockerContextPath: '.',
+    dockerBuildStage: '',
   }, config)
   ok('Build type : Dockerfile')
 }
@@ -310,8 +339,7 @@ async function main() {
   }
 
   // 1. Projet
-  const project = await getOrCreateProject(projectName, config)
-  const environmentId = await getEnvironmentId(project.projectId, config)
+  const { projectId, environmentId } = await getOrCreateProject(projectName, config)
 
   // 2. PostgreSQL
   const pg = await createPostgres(name, environmentId, config)
@@ -332,7 +360,7 @@ async function main() {
 
   // 6. Rapport
   appendToSetupReport(name, {
-    appUrl: `${config.DOKPLOY_URL}/dashboard/project/${project.projectId}/application/${app.applicationId}`,
+    appUrl: `${config.DOKPLOY_URL}/dashboard/project/${projectId}/application/${app.applicationId}`,
     pgAppName: pg.appName,
     databaseUrl: pg.internalUrl,
     serverUrl: args.serverUrl,
