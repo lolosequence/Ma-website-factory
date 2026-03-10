@@ -7,24 +7,21 @@
  *
  * Options:
  *   --dry-run          Simuler sans créer
- *   --skip-neon        Ne pas créer la DB Neon
- *   --skip-vercel      Ne pas créer le projet Vercel
  *   --skip-clone       Ne pas cloner en local
  *   --skip-install     Cloner sans lancer npm install (plus rapide sur Windows FS)
  *   --skip-dokploy     Ne pas configurer Dokploy
  *   --server-url URL   URL publique prod (ex: https://yellov.mawebsitefactory.fr)
  *                      Défaut : https://{slug}.mawebsitefactory.fr
+ *   --server-id ID     ID du serveur Dokploy cible (pour héberger chez le client)
  *   --pg-port PORT     Port PostgreSQL local (défaut: auto-détecté à partir de 5432)
  *
  * Prérequis (variables d'environnement ou ~/.new-site.env) :
  *   GITHUB_TOKEN       — token GitHub avec scopes: repo, workflow
  *   GITHUB_USERNAME    — ton username GitHub (ex: lolosequence)
  *   GITHUB_TEMPLATE    — nom du repo template (défaut: Ma-website-factory)
- *   VERCEL_TOKEN       — token Vercel (Account Settings → Tokens)
- *   VERCEL_TEAM_ID     — team ID Vercel (optionnel, si tu travailles en équipe)
- *   NEON_API_KEY       — token API Neon (Account → API Keys)
- *   NEON_REGION        — région Neon (défaut: aws-eu-central-1)
  *   LOCAL_PROJECTS_DIR — chemin local pour cloner (défaut: /mnt/c/Users/laure/Mes projets/Mes clients)
+ *   DOKPLOY_URL        — URL de l'instance Dokploy (ex: https://admin.workflowlolo.fr)
+ *   DOKPLOY_TOKEN      — token API Dokploy
  */
 
 import { execSync } from 'child_process'
@@ -38,12 +35,8 @@ import { createServer } from 'net'
 const DEFAULTS = {
   GITHUB_USERNAME: 'lolosequence',
   GITHUB_TEMPLATE: 'Ma-website-factory',
-  NEON_REGION: 'aws-eu-central-1',
   LOCAL_PROJECTS_DIR: '/mnt/c/Users/laure/Mes projets/Mes clients',
 }
-
-// Chemin vers libsodium-wrappers (installé dans Ma factory/node_modules)
-const SODIUM_PATH = new URL('../node_modules/libsodium-wrappers/dist/modules/libsodium-wrappers.js', import.meta.url).pathname
 
 function loadEnv() {
   const envFile = join(homedir(), '.new-site.env')
@@ -62,10 +55,7 @@ function getConfig() {
   for (const [key, defaultVal] of Object.entries(DEFAULTS)) {
     config[key] = process.env[key] || defaultVal
   }
-  for (const key of ['GITHUB_TOKEN', 'VERCEL_TOKEN', 'NEON_API_KEY']) {
-    config[key] = process.env[key] || null
-  }
-  config.VERCEL_TEAM_ID = process.env.VERCEL_TEAM_ID || null
+  config.GITHUB_TOKEN = process.env.GITHUB_TOKEN || null
   config.DOKPLOY_TOKEN = process.env.DOKPLOY_TOKEN || null
   config.DOKPLOY_URL = (process.env.DOKPLOY_URL || '').replace(/\/$/, '') || null
   return config
@@ -82,8 +72,6 @@ function parseArgs() {
     else if (args[i] === '--server-url') result.serverUrl = args[++i]
     else if (args[i] === '--skip-clone') result.skipClone = true
     else if (args[i] === '--skip-install') result.skipInstall = true
-    else if (args[i] === '--skip-neon') result.skipNeon = true
-    else if (args[i] === '--skip-vercel') result.skipVercel = true
     else if (args[i] === '--skip-dokploy') result.skipDokploy = true
     else if (args[i] === '--server-id') result.serverId = args[++i]
     else if (args[i] === '--dry-run') result.dryRun = true
@@ -124,37 +112,6 @@ async function githubApi(path, method = 'GET', body = null, token) {
   return data
 }
 
-async function neonApi(path, method = 'GET', body = null, apiKey) {
-  const res = await fetch(`https://console.neon.tech/api/v2${path}`, {
-    method,
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  })
-  const data = await res.json()
-  if (!res.ok) throw new Error(`Neon API ${method} ${path} → ${res.status}: ${JSON.stringify(data)}`)
-  return data
-}
-
-async function vercelApi(path, method = 'GET', body = null, token, teamId) {
-  const url = teamId
-    ? `https://api.vercel.com${path}?teamId=${teamId}`
-    : `https://api.vercel.com${path}`
-  const res = await fetch(url, {
-    method,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  })
-  const data = await res.json()
-  if (!res.ok) throw new Error(`Vercel API ${method} ${path} → ${res.status}: ${JSON.stringify(data)}`)
-  return data
-}
-
 // ─── Étapes ─────────────────────────────────────────────────────────────────
 
 async function createGithubRepo(name, description, config) {
@@ -185,117 +142,6 @@ async function createGithubRepo(name, description, config) {
 
   ok(`Repo créé : ${repo.html_url}`)
   return repo
-}
-
-async function createNeonProject(name, config) {
-  log('🌿', `Création du projet Neon ${name}...`)
-
-  const project = await neonApi(
-    '/projects',
-    'POST',
-    {
-      project: {
-        name,
-        region_id: config.NEON_REGION,
-        pg_version: 16,
-      },
-    },
-    config.NEON_API_KEY
-  )
-
-  const connectionString = project.connection_uris?.[0]?.connection_uri
-    || project.project?.connection_uri
-
-  ok(`Projet Neon créé : ${project.project?.name} (${project.project?.id})`)
-  return { project: project.project, connectionString }
-}
-
-async function createVercelProject(name, repoFullName, config) {
-  log('▲ ', `Création du projet Vercel ${name}...`)
-
-  const existing = await vercelApi(
-    `/v9/projects/${name}`,
-    'GET', null, config.VERCEL_TOKEN, config.VERCEL_TEAM_ID
-  ).catch(() => null)
-
-  if (existing) {
-    warn(`Projet Vercel ${name} déjà existant → on continue`)
-    return existing
-  }
-
-  const project = await vercelApi(
-    '/v10/projects',
-    'POST',
-    {
-      name,
-      framework: 'nextjs',
-      gitRepository: {
-        type: 'github',
-        repo: repoFullName,
-      },
-    },
-    config.VERCEL_TOKEN,
-    config.VERCEL_TEAM_ID
-  )
-
-  ok(`Projet Vercel créé : ${project.name}`)
-  return project
-}
-
-async function setVercelEnvVars(projectId, envVars, config) {
-  log('🔧', `Configuration des variables d'environnement Vercel...`)
-
-  for (const { key, value, targets } of envVars) {
-    await vercelApi(
-      `/v10/projects/${projectId}/env`,
-      'POST',
-      {
-        key,
-        value,
-        type: 'encrypted',
-        target: targets || ['preview'],
-      },
-      config.VERCEL_TOKEN,
-      config.VERCEL_TEAM_ID
-    ).catch(err => {
-      warn(`Env var ${key} : ${err.message} (peut-être déjà existante)`)
-    })
-  }
-
-  ok(`Variables d'environnement configurées`)
-}
-
-async function setGithubSecrets(repoName, secrets, config) {
-  log('🔐', `Configuration des secrets GitHub...`)
-
-  // Récupérer la clé publique du repo pour chiffrer les secrets
-  const { key: repoPublicKey, key_id } = await githubApi(
-    `/repos/${config.GITHUB_USERNAME}/${repoName}/actions/secrets/public-key`,
-    'GET', null, config.GITHUB_TOKEN
-  )
-
-  // Chiffrement via libsodium-wrappers (crypto_box_seal)
-  const sodium = (await import(SODIUM_PATH)).default
-  await sodium.ready
-
-  for (const { name: secretName, value } of secrets) {
-    if (!value) {
-      warn(`Secret ${secretName} ignoré (valeur vide)`)
-      continue
-    }
-    const keyBytes = Buffer.from(repoPublicKey, 'base64')
-    const msgBytes = Buffer.from(value)
-    const encrypted = sodium.crypto_box_seal(msgBytes, keyBytes)
-    const encryptedB64 = Buffer.from(encrypted).toString('base64')
-
-    await githubApi(
-      `/repos/${config.GITHUB_USERNAME}/${repoName}/actions/secrets/${secretName}`,
-      'PUT',
-      { encrypted_value: encryptedB64, key_id },
-      config.GITHUB_TOKEN
-    )
-    ok(`Secret ${secretName} configuré`)
-  }
 }
 
 function isPortAvailable(port) {
@@ -354,7 +200,6 @@ function generateSecret() {
   try {
     return run('openssl rand -hex 32', { silent: true }).trim()
   } catch {
-    // Fallback JS
     return [...Array(64)].map(() => Math.floor(Math.random() * 16).toString(16)).join('')
   }
 }
@@ -370,16 +215,6 @@ Généré le ${new Date().toISOString()}
 | Ressource | URL / Valeur |
 |-----------|-------------|
 | Repo GitHub | ${data.repoUrl} |
-| Projet Vercel | ${data.vercelUrl || 'https://vercel.com/dashboard'} |
-| Projet Neon | ${data.neonProjectId || 'voir neon.tech'} |
-
-## Variables d'environnement (Vercel / Production)
-
-\`\`\`
-DATABASE_URL=${data.neonConnectionString || '← à copier depuis neon.tech'}
-PAYLOAD_SECRET=${data.payloadSecret}
-NEXT_PUBLIC_SERVER_URL=https://${name}.vercel.app
-\`\`\`
 
 ## Variables d'environnement (Dev local)
 
@@ -391,11 +226,11 @@ POSTGRES_DB=${name.replace(/^site-/, '')}
 POSTGRES_PORT=${data.pgPort}
 \`\`\`
 
-(.env pré-rempli automatiquement si --skip-install non utilisé)
+(.env pré-rempli automatiquement dans le repo cloné)
 
 ## Prochaines étapes
 
-- [ ] Vérifier le déploiement preview sur Vercel
+- [ ] Vérifier le déploiement sur Dokploy
 - [ ] Dokploy → Application → Domains → Ajouter le domaine prod
 - [ ] Lancer \`/scaffold-collection\` pour ajouter les collections client
 - [ ] Supprimer ce fichier avant de commit
@@ -432,15 +267,13 @@ async function main() {
   // Vérification des tokens requis
   const missing = []
   if (!config.GITHUB_TOKEN) missing.push('GITHUB_TOKEN')
-  if (!config.VERCEL_TOKEN && !args.skipVercel) missing.push('VERCEL_TOKEN')
-  if (!config.NEON_API_KEY && !args.skipNeon) missing.push('NEON_API_KEY')
   if (!config.DOKPLOY_TOKEN && !args.skipDokploy) missing.push('DOKPLOY_TOKEN')
   if (!config.DOKPLOY_URL && !args.skipDokploy) missing.push('DOKPLOY_URL')
 
   if (missing.length) {
     console.log('\n⚠️  Variables manquantes. Crée le fichier ~/.new-site.env avec :')
     for (const key of missing) console.log(`  ${key}=...`)
-    console.log('\nVoir le README pour les instructions complètes.\n')
+    console.log('\nVoir scripts/new-site.env.example pour le template.\n')
     process.exit(1)
   }
 
@@ -449,8 +282,6 @@ async function main() {
 
   if (args.dryRun) {
     info(`[dry-run] Créerait le repo ${config.GITHUB_USERNAME}/${name}`)
-    info(`[dry-run] Créerait le projet Neon : ${name}`)
-    info(`[dry-run] Créerait le projet Vercel : ${name}`)
     info(`[dry-run] Clonerait dans : ${join(config.LOCAL_PROJECTS_DIR, name)}`)
     info(`[dry-run] Port PostgreSQL local : ${pgPort}`)
     if (!args.skipDokploy) info(`[dry-run] Configurerait Dokploy : ${serverUrl}`)
@@ -466,57 +297,15 @@ async function main() {
   // Attendre que le repo soit prêt (délai GitHub)
   await new Promise(r => setTimeout(r, 3000))
 
-  // 2. Neon DB
-  if (!args.skipNeon) {
-    const { project: neonProject, connectionString } = await createNeonProject(name, config)
-    report.neonProjectId = neonProject?.id
-    report.neonConnectionString = connectionString
+  // 2. Clone local
+  if (!args.skipClone) {
+    await cloneLocally(repo.clone_url, name, pgPort, args.skipInstall, config)
   }
 
-  // 3. Vercel projet
-  if (!args.skipVercel) {
-    const vercelProject = await createVercelProject(
-      name,
-      `${config.GITHUB_USERNAME}/${name}`,
-      config
-    )
-    report.vercelUrl = `https://vercel.com/${config.GITHUB_USERNAME}/${name}`
-
-    // Variables Vercel (Preview)
-    await setVercelEnvVars(vercelProject.id, [
-      {
-        key: 'DATABASE_URL',
-        value: report.neonConnectionString || 'CONFIGURE_ME',
-        targets: ['preview'],
-      },
-      {
-        key: 'PAYLOAD_SECRET',
-        value: report.payloadSecret,
-        targets: ['preview', 'production'],
-      },
-      {
-        key: 'NEXT_PUBLIC_SERVER_URL',
-        value: `https://${name}.vercel.app`,
-        targets: ['preview'],
-      },
-    ], config)
-
-    // Secrets GitHub pour CI/CD
-    const vercelOrgId = config.VERCEL_TEAM_ID || ''
-    await setGithubSecrets(name, [
-      { name: 'VERCEL_TOKEN', value: config.VERCEL_TOKEN },
-      { name: 'VERCEL_ORG_ID', value: vercelOrgId },
-      { name: 'VERCEL_PROJECT_ID', value: vercelProject.id },
-    ], config)
-  }
-
-  // 4. Clone local
-  const localDir = await cloneLocally(repo.clone_url, name, pgPort, args.skipInstall, config)
-
-  // 5. Rapport
+  // 3. Rapport
   saveSetupReport(name, report, config)
 
-  // 6. Dokploy
+  // 4. Dokploy
   if (!args.skipDokploy && !args.skipClone) {
     log('🚀', 'Configuration Dokploy...')
     const dokployScript = join(new URL('.', import.meta.url).pathname, 'dokploy-setup.mjs')
@@ -537,8 +326,6 @@ async function main() {
   console.log(`
   📂 Local      : ${join(config.LOCAL_PROJECTS_DIR, name)}
   🐙 GitHub     : ${report.repoUrl}
-  ▲  Vercel     : ${report.vercelUrl || '(skipped)'}
-  🌿 Neon       : ${report.neonProjectId || '(skipped)'}
   🐘 PG local   : port ${report.pgPort}
   🌐 Prod       : ${args.skipDokploy ? '(skipped)' : serverUrl}
 
