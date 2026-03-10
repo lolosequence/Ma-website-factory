@@ -188,15 +188,16 @@ async function createPostgres(name, environmentId, config) {
     environmentId,
   }, config)
 
-  ok(`PostgreSQL créé : ${pg.postgresId}`)
+  // Dokploy peut ajouter un suffixe au appName — utiliser celui retourné par l'API
+  const realAppName = pg.appName || appName
+  ok(`PostgreSQL créé : ${pg.postgresId} (hostname: ${realAppName})`)
   return {
     postgresId: pg.postgresId,
-    appName,
-    databaseName: dbName,
-    databaseUser: dbUser,
-    databasePassword: dbPassword,
-    // URL interne Docker (accessible depuis les autres containers du même réseau)
-    internalUrl: `postgresql://${dbUser}:${dbPassword}@${appName}:5432/${dbName}`,
+    appName: realAppName,
+    databaseName: pg.databaseName || dbName,
+    databaseUser: pg.databaseUser || dbUser,
+    databasePassword: pg.databasePassword || dbPassword,
+    internalUrl: `postgresql://${pg.databaseUser || dbUser}:${pg.databasePassword || dbPassword}@${realAppName}:5432/${pg.databaseName || dbName}`,
   }
 }
 
