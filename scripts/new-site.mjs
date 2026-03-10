@@ -6,12 +6,15 @@
  *   node scripts/new-site.mjs --name site-boulangerie-dupont [--description "Site de la boulangerie Dupont"]
  *
  * Options:
- *   --dry-run        Simuler sans créer
- *   --skip-neon      Ne pas créer la DB Neon
- *   --skip-vercel    Ne pas créer le projet Vercel
- *   --skip-clone     Ne pas cloner en local
- *   --skip-install   Cloner sans lancer npm install (plus rapide sur Windows FS)
- *   --pg-port PORT   Port PostgreSQL local (défaut: auto-détecté à partir de 5432)
+ *   --dry-run          Simuler sans créer
+ *   --skip-neon        Ne pas créer la DB Neon
+ *   --skip-vercel      Ne pas créer le projet Vercel
+ *   --skip-clone       Ne pas cloner en local
+ *   --skip-install     Cloner sans lancer npm install (plus rapide sur Windows FS)
+ *   --skip-dokploy     Ne pas configurer Dokploy
+ *   --server-url URL   URL publique prod (ex: https://yellov.mawebsitefactory.fr)
+ *                      Défaut : https://{slug}.mawebsitefactory.fr
+ *   --pg-port PORT     Port PostgreSQL local (défaut: auto-détecté à partir de 5432)
  *
  * Prérequis (variables d'environnement ou ~/.new-site.env) :
  *   GITHUB_TOKEN       — token GitHub avec scopes: repo, workflow
@@ -63,6 +66,8 @@ function getConfig() {
     config[key] = process.env[key] || null
   }
   config.VERCEL_TEAM_ID = process.env.VERCEL_TEAM_ID || null
+  config.DOKPLOY_TOKEN = process.env.DOKPLOY_TOKEN || null
+  config.DOKPLOY_URL = (process.env.DOKPLOY_URL || '').replace(/\/$/, '') || null
   return config
 }
 
@@ -74,10 +79,12 @@ function parseArgs() {
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--name') result.name = args[++i]
     else if (args[i] === '--description') result.description = args[++i]
+    else if (args[i] === '--server-url') result.serverUrl = args[++i]
     else if (args[i] === '--skip-clone') result.skipClone = true
     else if (args[i] === '--skip-install') result.skipInstall = true
     else if (args[i] === '--skip-neon') result.skipNeon = true
     else if (args[i] === '--skip-vercel') result.skipVercel = true
+    else if (args[i] === '--skip-dokploy') result.skipDokploy = true
     else if (args[i] === '--dry-run') result.dryRun = true
     else if (args[i] === '--pg-port') result.pgPort = parseInt(args[++i], 10)
   }
@@ -388,20 +395,9 @@ POSTGRES_PORT=${data.pgPort}
 ## Prochaines étapes
 
 - [ ] Vérifier le déploiement preview sur Vercel
-- [ ] Configurer Dokploy (production)
+- [ ] Dokploy → Application → Domains → Ajouter le domaine prod
 - [ ] Lancer \`/scaffold-collection\` pour ajouter les collections client
 - [ ] Supprimer ce fichier avant de commit
-
-## Checklist Dokploy
-
-\`\`\`
-□ New Application → Source GitHub → ${name}
-□ Build type : Dockerfile
-□ Auto deploy sur push main : activé
-□ Build Args : DATABASE_URL (Postgres Dokploy) + PAYLOAD_SECRET
-□ Environment : DATABASE_URL + PAYLOAD_SECRET + NEXT_PUBLIC_SERVER_URL
-□ Volume : ${name}-media → /app/public/media
-\`\`\`
 `
   try {
     writeFileSync(reportPath, content)
@@ -423,18 +419,22 @@ async function main() {
   }
 
   const name = args.name
-  const slug = name.replace(/^site-/, '')  // "boulangerie-dupont"
 
   console.log(`\n${'═'.repeat(60)}`)
   console.log(`  Création du site : ${name}`)
   if (args.dryRun) console.log(`  MODE DRY-RUN — aucune action réelle`)
   console.log(`${'═'.repeat(60)}\n`)
 
+  const slug = name.replace(/^site-/, '')
+  const serverUrl = args.serverUrl || `https://${slug}.mawebsitefactory.fr`
+
   // Vérification des tokens requis
   const missing = []
   if (!config.GITHUB_TOKEN) missing.push('GITHUB_TOKEN')
   if (!config.VERCEL_TOKEN && !args.skipVercel) missing.push('VERCEL_TOKEN')
   if (!config.NEON_API_KEY && !args.skipNeon) missing.push('NEON_API_KEY')
+  if (!config.DOKPLOY_TOKEN && !args.skipDokploy) missing.push('DOKPLOY_TOKEN')
+  if (!config.DOKPLOY_URL && !args.skipDokploy) missing.push('DOKPLOY_URL')
 
   if (missing.length) {
     console.log('\n⚠️  Variables manquantes. Crée le fichier ~/.new-site.env avec :')
@@ -452,6 +452,7 @@ async function main() {
     info(`[dry-run] Créerait le projet Vercel : ${name}`)
     info(`[dry-run] Clonerait dans : ${join(config.LOCAL_PROJECTS_DIR, name)}`)
     info(`[dry-run] Port PostgreSQL local : ${pgPort}`)
+    if (!args.skipDokploy) info(`[dry-run] Configurerait Dokploy : ${serverUrl}`)
     return
   }
 
@@ -514,6 +515,19 @@ async function main() {
   // 5. Rapport
   saveSetupReport(name, report, config)
 
+  // 6. Dokploy
+  if (!args.skipDokploy && !args.skipClone) {
+    log('🚀', 'Configuration Dokploy...')
+    const dokployScript = join(new URL('.', import.meta.url).pathname, 'dokploy-setup.mjs')
+    run(
+      `node "${dokployScript}" --name "${name}" --server-url "${serverUrl}" --payload-secret "${report.payloadSecret}"`,
+      { shell: true }
+    )
+  } else if (args.skipDokploy) {
+    info('Dokploy ignoré (--skip-dokploy) — lancer manuellement :')
+    info(`  node scripts/dokploy-setup.mjs --name ${name} --server-url ${serverUrl}`)
+  }
+
   // ─── Résumé ───────────────────────────────────────────────────────────────
   console.log(`\n${'═'.repeat(60)}`)
   console.log('  ✅ Site configuré avec succès !')
@@ -524,6 +538,7 @@ async function main() {
   ▲  Vercel     : ${report.vercelUrl || '(skipped)'}
   🌿 Neon       : ${report.neonProjectId || '(skipped)'}
   🐘 PG local   : port ${report.pgPort}
+  🌐 Prod       : ${args.skipDokploy ? '(skipped)' : serverUrl}
 
   Prochaines étapes :
   1. cd "${join(config.LOCAL_PROJECTS_DIR, name)}"
@@ -531,7 +546,7 @@ async function main() {
   3. docker-compose up -d  →  démarrer PostgreSQL local (port ${report.pgPort})
   4. npm run payload migrate
   5. npm run dev
-  6. Configurer Dokploy (voir SETUP-REPORT.md)
+  6. Dokploy → Application → Domains → Ajouter ${serverUrl.replace(/^https?:\/\//, '')}
   `)
 }
 

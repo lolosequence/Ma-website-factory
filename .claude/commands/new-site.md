@@ -19,7 +19,8 @@ Si l'utilisateur n'a pas fourni les infos, demande :
 2. **Description courte** du site (pour GitHub/Vercel)
 3. **Collections Payload** à créer (ex: "Articles de blog, Galerie photo, Menu")
 4. **Contenu de base** : sections de la page d'accueil ?
-5. **Skip infra ?** (`--skip-neon --skip-vercel`) si déjà configuré
+5. **URL de prod** (ex: `https://client.mawebsitefactory.fr`) — défaut auto: `https://{slug}.mawebsitefactory.fr`
+6. **Skip infra ?** (`--skip-neon --skip-vercel --skip-dokploy`) si déjà configuré
 
 ---
 
@@ -42,7 +43,8 @@ Si le fichier n'existe pas, guide l'utilisateur :
 ```bash
 node "/mnt/c/Users/laure/Mes projets/Ma factory/scripts/new-site.mjs" \
   --name site-NOM-DU-CLIENT \
-  --description "Description du site"
+  --description "Description du site" \
+  --server-url https://NOM-DU-CLIENT.mawebsitefactory.fr
 ```
 
 Options disponibles :
@@ -50,6 +52,9 @@ Options disponibles :
 - `--skip-neon` : ne pas créer la DB Neon
 - `--skip-vercel` : ne pas créer le projet Vercel
 - `--skip-clone` : ne pas cloner en local
+- `--skip-install` : ne pas lancer npm install (recommandé sur Windows/WSL)
+- `--skip-dokploy` : ne pas configurer Dokploy (le faire manuellement après)
+- `--server-url URL` : URL publique prod (défaut: `https://{slug}.mawebsitefactory.fr`)
 
 ### 1.3 Vérifier les résultats
 
@@ -57,6 +62,20 @@ Après le script, vérifier :
 - Le repo GitHub est accessible
 - Le rapport `SETUP-REPORT.md` est présent dans le nouveau repo
 - Les variables Vercel sont configurées
+
+---
+
+### 1.3 Vérifier les résultats
+
+Le script enchaîne automatiquement :
+- Repo GitHub créé et cloné
+- Neon DB créée
+- Vercel projet créé + secrets GitHub configurés
+- **Dokploy** : PostgreSQL + Application configurés, premier déploiement lancé
+
+Après le script, vérifier dans [admin.workflowlolo.fr](https://admin.workflowlolo.fr) que le build tourne.
+
+**Étape manuelle restante :** Dokploy → Application → **Domains** → Ajouter le domaine prod + DNS chez le registrar.
 
 ---
 
@@ -147,14 +166,15 @@ Une fois les 3 phases terminées, afficher le récapitulatif :
 ```
 ✅ Site [Nom Client] créé et configuré !
 
-📂 Local  : /mnt/c/Users/laure/Mes projets/site-NOM-DU-CLIENT
+📂 Local  : /mnt/c/Users/laure/Mes projets/Mes clients/site-NOM-DU-CLIENT
 🐙 GitHub : https://github.com/lolosequence/site-NOM-DU-CLIENT
 ▲  Vercel : https://vercel.com/lolosequence/site-NOM-DU-CLIENT
 🌿 Neon   : voir SETUP-REPORT.md
+🌐 Prod   : https://NOM-DU-CLIENT.mawebsitefactory.fr (Dokploy)
 
 Prochaines étapes :
-□ Configurer Dokploy (voir SETUP-REPORT.md → Checklist Dokploy)
-□ Connecter le Vercel Blob store au projet
+□ Dokploy → Domains → Ajouter le domaine + configurer le DNS
+□ Connecter le Vercel Blob store au projet (preview)
 □ Valider sur le preview Vercel
 □ Supprimer SETUP-REPORT.md avant le premier vrai commit
 ```
