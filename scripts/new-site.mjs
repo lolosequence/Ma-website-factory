@@ -85,6 +85,7 @@ function parseArgs() {
     else if (args[i] === '--skip-neon') result.skipNeon = true
     else if (args[i] === '--skip-vercel') result.skipVercel = true
     else if (args[i] === '--skip-dokploy') result.skipDokploy = true
+    else if (args[i] === '--server-id') result.serverId = args[++i]
     else if (args[i] === '--dry-run') result.dryRun = true
     else if (args[i] === '--pg-port') result.pgPort = parseInt(args[++i], 10)
   }
@@ -519,8 +520,9 @@ async function main() {
   if (!args.skipDokploy && !args.skipClone) {
     log('🚀', 'Configuration Dokploy...')
     const dokployScript = join(new URL('.', import.meta.url).pathname, 'dokploy-setup.mjs')
+    const serverIdFlag = args.serverId ? ` --server-id "${args.serverId}"` : ''
     run(
-      `node "${dokployScript}" --name "${name}" --server-url "${serverUrl}" --payload-secret "${report.payloadSecret}"`,
+      `node "${dokployScript}" --name "${name}" --server-url "${serverUrl}" --payload-secret "${report.payloadSecret}"${serverIdFlag}`,
       { shell: true }
     )
   } else if (args.skipDokploy) {

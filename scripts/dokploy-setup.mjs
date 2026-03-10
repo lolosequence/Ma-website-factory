@@ -10,6 +10,9 @@
  *   --server-url URL     URL publique du site sur Dokploy (ex: https://yellov.mawebsitefactory.fr)
  *   --project NAME       Nom du projet Dokploy (défaut: "Clients")
  *   --payload-secret S   Surcharger le PAYLOAD_SECRET (sinon lu depuis SETUP-REPORT.md)
+ *   --server-id ID       ID du serveur Dokploy cible (défaut: serveur principal)
+ *                        Utiliser --list-servers pour voir les IDs disponibles
+ *   --list-servers       Lister les serveurs Dokploy disponibles et quitter
  *   --dry-run            Simuler sans créer
  *
  * Prérequis dans ~/.new-site.env :
@@ -63,6 +66,8 @@ function parseArgs() {
     else if (args[i] === '--server-url') result.serverUrl = args[++i]
     else if (args[i] === '--project') result.project = args[++i]
     else if (args[i] === '--payload-secret') result.payloadSecret = args[++i]
+    else if (args[i] === '--server-id') result.serverId = args[++i]
+    else if (args[i] === '--list-servers') result.listServers = true
     else if (args[i] === '--dry-run') result.dryRun = true
   }
   return result
@@ -129,6 +134,16 @@ function appendToSetupReport(name, dokployInfo, config) {
   ok('SETUP-REPORT.md mis à jour avec les infos Dokploy')
 }
 
+async function listServers(config) {
+  const servers = await dokployApi('server.all', 'GET', null, config)
+  console.log('\nServeurs Dokploy disponibles :\n')
+  console.log('  (principal)  serverId: <vide>  — serveur par défaut')
+  for (const s of servers || []) {
+    console.log(`  ${s.name.padEnd(20)} serverId: ${s.serverId}  (${s.ipAddress || s.ip || 'IP non renseignée'})`)
+  }
+  console.log('\nUsage : --server-id <serverId>\n')
+}
+
 // ─── Étapes ──────────────────────────────────────────────────────────────────
 
 async function getOrCreateProject(projectName, config) {
@@ -151,7 +166,7 @@ async function getOrCreateProject(projectName, config) {
   return { projectId, environmentId }
 }
 
-async function createPostgres(name, environmentId, config) {
+async function createPostgres(name, environmentId, serverId, config) {
   const slug = name.replace(/^site-/, '')
   const dbName = slug.replace(/-/g, '_')
   const dbUser = `${dbName}_user`
@@ -177,7 +192,7 @@ async function createPostgres(name, environmentId, config) {
     }
   }
 
-  log('🐘', `Création PostgreSQL "${appName}"...`)
+  log('🐘', `Création PostgreSQL "${appName}"${serverId ? ` sur serveur ${serverId}` : ''}...`)
   const pg = await dokployApi('postgres.create', 'POST', {
     name: `${name}-db`,
     appName,
@@ -186,6 +201,7 @@ async function createPostgres(name, environmentId, config) {
     databasePassword: dbPassword,
     dockerImage: 'postgres:16-alpine',
     environmentId,
+    ...(serverId ? { serverId } : {}),
   }, config)
 
   // Dokploy peut ajouter un suffixe au appName — utiliser celui retourné par l'API
@@ -232,7 +248,7 @@ async function getGithubProviderId(config) {
   return providers[0].githubId
 }
 
-async function createApplication(name, environmentId, config) {
+async function createApplication(name, environmentId, serverId, config) {
   // Vérifier si l'application existe déjà dans cet environment
   const projects = await dokployApi('project.all', 'GET', null, config)
   for (const project of projects) {
@@ -244,8 +260,12 @@ async function createApplication(name, environmentId, config) {
       }
     }
   }
-  log('🚀', `Création de l'application "${name}"...`)
-  const app = await dokployApi('application.create', 'POST', { name, environmentId }, config)
+  log('🚀', `Création de l'application "${name}"${serverId ? ` sur serveur ${serverId}` : ''}...`)
+  const app = await dokployApi('application.create', 'POST', {
+    name,
+    environmentId,
+    ...(serverId ? { serverId } : {}),
+  }, config)
   ok(`Application créée : ${app.applicationId}`)
   return app
 }
@@ -320,13 +340,21 @@ async function main() {
   const args = parseArgs()
   const config = getConfig()
 
-  if (!args.name) fail('--name requis. Ex: node scripts/dokploy-setup.mjs --name site-yellov --server-url https://yellov.mawebsitefactory.fr')
-  if (!args.serverUrl) fail('--server-url requis. Ex: --server-url https://yellov.mawebsitefactory.fr')
   if (!config.DOKPLOY_TOKEN) fail('DOKPLOY_TOKEN manquant dans ~/.new-site.env')
   if (!config.DOKPLOY_URL) fail('DOKPLOY_URL manquant dans ~/.new-site.env')
 
+  // Mode liste des serveurs
+  if (args.listServers) {
+    await listServers(config)
+    return
+  }
+
+  if (!args.name) fail('--name requis. Ex: node scripts/dokploy-setup.mjs --name site-yellov --server-url https://yellov.mawebsitefactory.fr')
+  if (!args.serverUrl) fail('--server-url requis. Ex: --server-url https://yellov.mawebsitefactory.fr')
+
   const name = args.name
   const projectName = args.project || DEFAULTS.DOKPLOY_PROJECT_NAME
+  const serverId = args.serverId || null
 
   // Lire PAYLOAD_SECRET depuis SETUP-REPORT.md ou --payload-secret
   const payloadSecret = args.payloadSecret || readSetupReport(name, config)
@@ -344,6 +372,7 @@ async function main() {
     info(`[dry-run] Application : ${name}`)
     info(`[dry-run] GitHub : ${config.GITHUB_USERNAME}/${name} → main`)
     info(`[dry-run] URL : ${args.serverUrl}`)
+    info(`[dry-run] Serveur : ${serverId || '(principal)'}`)
     return
   }
 
@@ -351,14 +380,14 @@ async function main() {
   const { projectId, environmentId } = await getOrCreateProject(projectName, config)
 
   // 2. PostgreSQL
-  const pg = await createPostgres(name, environmentId, config)
+  const pg = await createPostgres(name, environmentId, serverId, config)
   await deployAndWaitPostgres(pg.postgresId, config)
 
   // 3. GitHub provider ID
   const githubId = await getGithubProviderId(config)
 
   // 4. Application
-  const app = await createApplication(name, environmentId, config)
+  const app = await createApplication(name, environmentId, serverId, config)
   await configureGithub(app.applicationId, name, githubId, config)
   await configureBuild(app.applicationId, config)
   await configureEnvVars(app.applicationId, pg.internalUrl, payloadSecret, args.serverUrl, config)
@@ -382,6 +411,7 @@ async function main() {
   🚀 Application  : ${name}
   🐘 PostgreSQL   : ${pg.appName} (Docker interne)
   🌐 URL cible    : ${args.serverUrl}
+  🖥️  Serveur      : ${serverId || 'principal'}
   📋 Dokploy UI   : ${config.DOKPLOY_URL}
 
   Prochaines étapes :
