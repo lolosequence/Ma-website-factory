@@ -88,7 +88,7 @@ async function dokployApi(path, method = 'GET', body = null, config) {
   })
   const text = await res.text()
   let data
-  try { data = JSON.parse(text) } catch { data = text }
+  try { data = text ? JSON.parse(text) : { status: res.status } } catch { data = text }
   if (!res.ok) throw new Error(`Dokploy ${method} /${path} → ${res.status}: ${JSON.stringify(data)}`)
   return data
 }
@@ -220,6 +220,14 @@ async function deployAndWaitPostgres(postgresId, config) {
 async function getGithubProviderId(config) {
   const providers = await dokployApi('github.githubProviders', 'GET', null, config)
   if (!providers?.length) throw new Error('Aucun GitHub provider configuré dans Dokploy. Aller dans Settings → Git Providers → GitHub.')
+  // Chercher le provider dont le nom correspond au GITHUB_USERNAME
+  const match = providers.find(p => p.gitProvider?.name?.toLowerCase() === config.GITHUB_USERNAME.toLowerCase())
+  if (match) {
+    info(`GitHub provider sélectionné : "${match.gitProvider.name}" (${match.githubId})`)
+    return match.githubId
+  }
+  // Fallback : premier provider dispo
+  warn(`Aucun provider nommé "${config.GITHUB_USERNAME}" — utilisation de "${providers[0].gitProvider?.name}"`)
   return providers[0].githubId
 }
 
