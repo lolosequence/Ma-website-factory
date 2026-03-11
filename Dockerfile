@@ -51,6 +51,9 @@ COPY --from=builder /app/.next ./.next
 # Source Payload (requis par payload migrate pour charger la config TypeScript)
 COPY --from=builder /app/src ./src
 
+# Scripts d'automatisation (new-site, dokploy-setup)
+COPY --from=builder /app/scripts ./scripts
+
 # Fichiers de config
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/next.config.mjs ./next.config.mjs
