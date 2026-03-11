@@ -28,8 +28,13 @@ export const POST = async (request: Request) => {
   const siteName = name.startsWith('site-') ? name : `site-${name}`
   const scriptPath = join(process.cwd(), 'scripts', 'new-site.mjs')
 
+  // GitHub limite la description à 350 caractères sans caractères de contrôle
+  const safeDescription = description
+    ? description.replace(/[\x00-\x1F\x7F]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 350)
+    : undefined
+
   const args = ['--name', siteName, '--skip-clone']
-  if (description) args.push('--description', description)
+  if (safeDescription) args.push('--description', safeDescription)
   if (template === 'static') args.push('--template', 'static')
 
   console.log(`[webhook] Lancement new-site pour : ${siteName} (script: ${scriptPath})`)
