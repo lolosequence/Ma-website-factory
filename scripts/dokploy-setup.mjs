@@ -68,6 +68,7 @@ function parseArgs() {
     else if (args[i] === '--payload-secret') result.payloadSecret = args[++i]
     else if (args[i] === '--server-id') result.serverId = args[++i]
     else if (args[i] === '--list-servers') result.listServers = true
+    else if (args[i] === '--static') result.isStatic = true
     else if (args[i] === '--dry-run') result.dryRun = true
   }
   return result
@@ -296,17 +297,15 @@ async function configureBuild(applicationId, config) {
   ok('Build type : Dockerfile')
 }
 
-async function configureEnvVars(applicationId, databaseUrl, payloadSecret, serverUrl, config) {
+async function configureEnvVars(applicationId, serverUrl, config, extras = {}) {
   log('🔑', 'Configuration des variables d\'environnement...')
-  const env = [
-    `DATABASE_URL=${databaseUrl}`,
-    `PAYLOAD_SECRET=${payloadSecret}`,
-    `NEXT_PUBLIC_SERVER_URL=${serverUrl}`,
-  ].join('\n')
+  const vars = [`NEXT_PUBLIC_SERVER_URL=${serverUrl}`]
+  if (extras.databaseUrl) vars.push(`DATABASE_URL=${extras.databaseUrl}`)
+  if (extras.payloadSecret) vars.push(`PAYLOAD_SECRET=${extras.payloadSecret}`)
 
   await dokployApi('application.saveEnvironment', 'POST', {
     applicationId,
-    env,
+    env: vars.join('\n'),
     buildArgs: '',
   }, config)
   ok('Variables d\'environnement configurées')
@@ -355,20 +354,25 @@ async function main() {
   const name = args.name
   const projectName = args.project || DEFAULTS.DOKPLOY_PROJECT_NAME
   const serverId = args.serverId || null
+  const isStatic = args.isStatic || false
 
-  // Lire PAYLOAD_SECRET depuis SETUP-REPORT.md ou --payload-secret
-  const payloadSecret = args.payloadSecret || readSetupReport(name, config)
-  if (!payloadSecret) fail(`PAYLOAD_SECRET introuvable. Passe --payload-secret ou vérifie SETUP-REPORT.md dans ${join(config.LOCAL_PROJECTS_DIR, name)}`)
+  // Lire PAYLOAD_SECRET uniquement pour le template Payload
+  let payloadSecret = null
+  if (!isStatic) {
+    payloadSecret = args.payloadSecret || readSetupReport(name, config)
+    if (!payloadSecret) fail(`PAYLOAD_SECRET introuvable. Passe --payload-secret ou vérifie SETUP-REPORT.md dans ${join(config.LOCAL_PROJECTS_DIR, name)}`)
+  }
 
   console.log(`\n${'═'.repeat(60)}`)
   console.log(`  Dokploy setup : ${name}`)
+  console.log(`  Template      : ${isStatic ? 'statique (Next.js + Tailwind)' : 'Payload CMS + PostgreSQL'}`)
   console.log(`  URL cible     : ${args.serverUrl}`)
   if (args.dryRun) console.log(`  MODE DRY-RUN — aucune action réelle`)
   console.log(`${'═'.repeat(60)}\n`)
 
   if (args.dryRun) {
     info(`[dry-run] Projet Dokploy : "${projectName}"`)
-    info(`[dry-run] PostgreSQL : ${name}-db (interne Docker)`)
+    if (!isStatic) info(`[dry-run] PostgreSQL : ${name}-db (interne Docker)`)
     info(`[dry-run] Application : ${name}`)
     info(`[dry-run] GitHub : ${config.GITHUB_USERNAME}/${name} → main`)
     info(`[dry-run] URL : ${args.serverUrl}`)
@@ -379,9 +383,12 @@ async function main() {
   // 1. Projet
   const { projectId, environmentId } = await getOrCreateProject(projectName, config)
 
-  // 2. PostgreSQL
-  const pg = await createPostgres(name, environmentId, serverId, config)
-  await deployAndWaitPostgres(pg.postgresId, config)
+  // 2. PostgreSQL (uniquement pour Payload)
+  let pg = null
+  if (!isStatic) {
+    pg = await createPostgres(name, environmentId, serverId, config)
+    await deployAndWaitPostgres(pg.postgresId, config)
+  }
 
   // 3. GitHub provider ID
   const githubId = await getGithubProviderId(config)
@@ -390,8 +397,11 @@ async function main() {
   const app = await createApplication(name, environmentId, serverId, config)
   await configureGithub(app.applicationId, name, githubId, config)
   await configureBuild(app.applicationId, config)
-  await configureEnvVars(app.applicationId, pg.internalUrl, payloadSecret, args.serverUrl, config)
-  await addMediaVolume(app.applicationId, config)
+  await configureEnvVars(app.applicationId, args.serverUrl, config, {
+    databaseUrl: pg?.internalUrl,
+    payloadSecret,
+  })
+  if (!isStatic) await addMediaVolume(app.applicationId, config)
 
   // 5. Premier déploiement
   await deployApplication(app.applicationId, config)
@@ -399,8 +409,8 @@ async function main() {
   // 6. Rapport
   appendToSetupReport(name, {
     appUrl: `${config.DOKPLOY_URL}/dashboard/project/${projectId}/application/${app.applicationId}`,
-    pgAppName: pg.appName,
-    databaseUrl: pg.internalUrl,
+    pgAppName: pg?.appName || 'N/A',
+    databaseUrl: pg?.internalUrl || 'N/A',
     serverUrl: args.serverUrl,
   }, config)
 
@@ -409,7 +419,7 @@ async function main() {
   console.log(`${'═'.repeat(60)}`)
   console.log(`
   🚀 Application  : ${name}
-  🐘 PostgreSQL   : ${pg.appName} (Docker interne)
+  ${isStatic ? '🎨 Template     : statique (Next.js + Tailwind)' : `🐘 PostgreSQL   : ${pg.appName} (Docker interne)`}
   🌐 URL cible    : ${args.serverUrl}
   🖥️  Serveur      : ${serverId || 'principal'}
   📋 Dokploy UI   : ${config.DOKPLOY_URL}
