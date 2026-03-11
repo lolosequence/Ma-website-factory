@@ -8,14 +8,14 @@ export const POST = async (request: Request) => {
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  let body: { name?: string; description?: string }
+  let body: { name?: string; description?: string; template?: string }
   try {
     body = await request.json()
   } catch {
     return Response.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  const { name, description } = body
+  const { name, description, template } = body
 
   if (!name || typeof name !== 'string' || !/^[a-z0-9-]+$/.test(name)) {
     return Response.json(
@@ -29,6 +29,7 @@ export const POST = async (request: Request) => {
 
   const args = ['--name', siteName, '--skip-clone']
   if (description) args.push('--description', description)
+  if (template === 'static') args.push('--template', 'static')
 
   // Lancer le script en arrière-plan (sans bloquer la réponse)
   const child = spawn('node', [scriptPath, ...args], {

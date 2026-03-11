@@ -6,6 +6,8 @@
  *   node scripts/new-site.mjs --name site-boulangerie-dupont [--description "Site de la boulangerie Dupont"]
  *
  * Options:
+ *   --template static  Utiliser le template statique (Next.js + Tailwind, sans Payload)
+ *                      Défaut : template complet (Payload CMS + PostgreSQL)
  *   --dry-run          Simuler sans créer
  *   --skip-clone       Ne pas cloner en local
  *   --skip-install     Cloner sans lancer npm install (plus rapide sur Windows FS)
@@ -16,12 +18,13 @@
  *   --pg-port PORT     Port PostgreSQL local (défaut: auto-détecté à partir de 5432)
  *
  * Prérequis (variables d'environnement ou ~/.new-site.env) :
- *   GITHUB_TOKEN       — token GitHub avec scopes: repo, workflow
- *   GITHUB_USERNAME    — ton username GitHub (ex: lolosequence)
- *   GITHUB_TEMPLATE    — nom du repo template (défaut: Ma-website-factory)
- *   LOCAL_PROJECTS_DIR — chemin local pour cloner (défaut: /mnt/c/Users/laure/Mes projets/Mes clients)
- *   DOKPLOY_URL        — URL de l'instance Dokploy (ex: https://admin.workflowlolo.fr)
- *   DOKPLOY_TOKEN      — token API Dokploy
+ *   GITHUB_TOKEN           — token GitHub avec scopes: repo, workflow
+ *   GITHUB_USERNAME        — ton username GitHub (ex: lolosequence)
+ *   GITHUB_TEMPLATE        — nom du repo template Payload (défaut: Ma-website-factory)
+ *   GITHUB_TEMPLATE_STATIC — nom du repo template statique (défaut: Ma-website-factory-static)
+ *   LOCAL_PROJECTS_DIR     — chemin local pour cloner (défaut: /mnt/c/Users/laure/Mes projets/Mes clients)
+ *   DOKPLOY_URL            — URL de l'instance Dokploy (ex: https://admin.workflowlolo.fr)
+ *   DOKPLOY_TOKEN          — token API Dokploy
  */
 
 import { execSync } from 'child_process'
@@ -35,6 +38,7 @@ import { createServer } from 'net'
 const DEFAULTS = {
   GITHUB_USERNAME: 'lolosequence',
   GITHUB_TEMPLATE: 'Ma-website-factory',
+  GITHUB_TEMPLATE_STATIC: 'Ma-website-factory-static',
   LOCAL_PROJECTS_DIR: '/mnt/c/Users/laure/Mes projets/Mes clients',
 }
 
@@ -74,6 +78,7 @@ function parseArgs() {
     else if (args[i] === '--skip-install') result.skipInstall = true
     else if (args[i] === '--skip-dokploy') result.skipDokploy = true
     else if (args[i] === '--server-id') result.serverId = args[++i]
+    else if (args[i] === '--template') result.template = args[++i]
     else if (args[i] === '--dry-run') result.dryRun = true
     else if (args[i] === '--pg-port') result.pgPort = parseInt(args[++i], 10)
   }
@@ -114,8 +119,9 @@ async function githubApi(path, method = 'GET', body = null, token) {
 
 // ─── Étapes ─────────────────────────────────────────────────────────────────
 
-async function createGithubRepo(name, description, config) {
-  log('🐙', `Création du repo GitHub ${name}...`)
+async function createGithubRepo(name, description, template, config) {
+  const templateRepo = template === 'static' ? config.GITHUB_TEMPLATE_STATIC : config.GITHUB_TEMPLATE
+  log('🐙', `Création du repo GitHub ${name} (template: ${templateRepo})...`)
 
   const existing = await githubApi(
     `/repos/${config.GITHUB_USERNAME}/${name}`,
@@ -128,12 +134,12 @@ async function createGithubRepo(name, description, config) {
   }
 
   const repo = await githubApi(
-    `/repos/${config.GITHUB_USERNAME}/${config.GITHUB_TEMPLATE}/generate`,
+    `/repos/${config.GITHUB_USERNAME}/${templateRepo}/generate`,
     'POST',
     {
       owner: config.GITHUB_USERNAME,
       name,
-      description: description || `Site généré depuis ${config.GITHUB_TEMPLATE}`,
+      description: description || `Site généré depuis ${templateRepo}`,
       private: true,
       include_all_branches: false,
     },
@@ -282,16 +288,18 @@ async function main() {
 
   if (args.dryRun) {
     info(`[dry-run] Créerait le repo ${config.GITHUB_USERNAME}/${name}`)
+    info(`[dry-run] Template : ${args.template === 'static' ? config.GITHUB_TEMPLATE_STATIC : config.GITHUB_TEMPLATE}`)
     info(`[dry-run] Clonerait dans : ${join(config.LOCAL_PROJECTS_DIR, name)}`)
-    info(`[dry-run] Port PostgreSQL local : ${pgPort}`)
+    if (args.template !== 'static') info(`[dry-run] Port PostgreSQL local : ${pgPort}`)
     if (!args.skipDokploy) info(`[dry-run] Configurerait Dokploy : ${serverUrl}`)
     return
   }
 
-  const report = { repoUrl: '', payloadSecret: generateSecret(), pgPort }
+  const isStatic = args.template === 'static'
+  const report = { repoUrl: '', payloadSecret: isStatic ? null : generateSecret(), pgPort }
 
   // 1. Repo GitHub
-  const repo = await createGithubRepo(name, args.description, config)
+  const repo = await createGithubRepo(name, args.description, args.template, config)
   report.repoUrl = repo.html_url
 
   // Attendre que le repo soit prêt (délai GitHub)
@@ -310,13 +318,15 @@ async function main() {
     log('🚀', 'Configuration Dokploy...')
     const dokployScript = join(decodeURIComponent(new URL('.', import.meta.url).pathname), 'dokploy-setup.mjs')
     const serverIdFlag = args.serverId ? ` --server-id "${args.serverId}"` : ''
+    const staticFlag = isStatic ? ' --static' : ''
+    const payloadFlag = isStatic ? '' : ` --payload-secret "${report.payloadSecret}"`
     run(
-      `node "${dokployScript}" --name "${name}" --server-url "${serverUrl}" --payload-secret "${report.payloadSecret}"${serverIdFlag}`,
+      `node "${dokployScript}" --name "${name}" --server-url "${serverUrl}"${payloadFlag}${serverIdFlag}${staticFlag}`,
       { shell: true }
     )
   } else if (args.skipDokploy) {
     info('Dokploy ignoré (--skip-dokploy) — lancer manuellement :')
-    info(`  node scripts/dokploy-setup.mjs --name ${name} --server-url ${serverUrl}`)
+    info(`  node scripts/dokploy-setup.mjs --name ${name} --server-url ${serverUrl}${isStatic ? ' --static' : ''}`)
   }
 
   // ─── Résumé ───────────────────────────────────────────────────────────────
@@ -326,16 +336,16 @@ async function main() {
   console.log(`
   📂 Local      : ${join(config.LOCAL_PROJECTS_DIR, name)}
   🐙 GitHub     : ${report.repoUrl}
-  🐘 PG local   : port ${report.pgPort}
+  ${isStatic ? '🎨 Template   : statique (Next.js + Tailwind)' : `🐘 PG local   : port ${report.pgPort}`}
   🌐 Prod       : ${args.skipDokploy ? '(skipped)' : serverUrl}
 
   Prochaines étapes :
   1. cd "${join(config.LOCAL_PROJECTS_DIR, name)}"
-  2. .env pré-rempli — vérifier les valeurs si besoin
+  ${isStatic ? '2. npm run dev' : `2. .env pré-rempli — vérifier les valeurs si besoin
   3. docker-compose up -d  →  démarrer PostgreSQL local (port ${report.pgPort})
   4. npm run payload migrate
-  5. npm run dev
-  6. Dokploy → Application → Domains → Ajouter ${serverUrl.replace(/^https?:\/\//, '')}
+  5. npm run dev`}
+  ${args.skipDokploy ? '' : `${isStatic ? '2' : '6'}. Dokploy → Application → Domains → Ajouter ${serverUrl.replace(/^https?:\/\//, '')}`}
   `)
 }
 
