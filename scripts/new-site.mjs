@@ -314,7 +314,7 @@ async function main() {
   saveSetupReport(name, report, config)
 
   // 4. Dokploy
-  if (!args.skipDokploy && !args.skipClone) {
+  if (!args.skipDokploy) {
     log('🚀', 'Configuration Dokploy...')
     const dokployScript = join(decodeURIComponent(new URL('.', import.meta.url).pathname), 'dokploy-setup.mjs')
     const serverIdFlag = args.serverId ? ` --server-id "${args.serverId}"` : ''
