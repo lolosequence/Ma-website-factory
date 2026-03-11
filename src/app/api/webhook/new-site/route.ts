@@ -27,7 +27,7 @@ export const POST = async (request: Request) => {
   const siteName = name.startsWith('site-') ? name : `site-${name}`
   const scriptPath = join(process.cwd(), 'scripts', 'new-site.mjs')
 
-  const args = ['--name', siteName, '--skip-install']
+  const args = ['--name', siteName, '--skip-clone']
   if (description) args.push('--description', description)
 
   // Lancer le script en arrière-plan (sans bloquer la réponse)
