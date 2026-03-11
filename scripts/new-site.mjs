@@ -308,7 +308,7 @@ async function main() {
   // 4. Dokploy
   if (!args.skipDokploy && !args.skipClone) {
     log('🚀', 'Configuration Dokploy...')
-    const dokployScript = join(new URL('.', import.meta.url).pathname, 'dokploy-setup.mjs')
+    const dokployScript = join(decodeURIComponent(new URL('.', import.meta.url).pathname), 'dokploy-setup.mjs')
     const serverIdFlag = args.serverId ? ` --server-id "${args.serverId}"` : ''
     run(
       `node "${dokployScript}" --name "${name}" --server-url "${serverUrl}" --payload-secret "${report.payloadSecret}"${serverIdFlag}`,
