@@ -1,4 +1,5 @@
-import { spawn } from 'child_process'
+import { after } from 'next/server'
+import { execFile } from 'child_process'
 import { join } from 'path'
 
 export const POST = async (request: Request) => {
@@ -31,15 +32,24 @@ export const POST = async (request: Request) => {
   if (description) args.push('--description', description)
   if (template === 'static') args.push('--template', 'static')
 
-  // Lancer le script en arrière-plan (sans bloquer la réponse)
-  const child = spawn('node', [scriptPath, ...args], {
-    detached: true,
-    stdio: 'ignore',
-    env: process.env,
-  })
-  child.unref()
+  console.log(`[webhook] Lancement new-site pour : ${siteName} (script: ${scriptPath})`)
+  console.log(`[webhook] Args : ${args.join(' ')}`)
 
-  console.log(`[webhook] Lancement new-site pour : ${siteName}`)
+  // after() exécute après la réponse HTTP — fiable dans Next.js 15, erreurs visibles dans les logs
+  after(async () => {
+    await new Promise<void>((resolve) => {
+      execFile('node', [scriptPath, ...args], { env: process.env }, (error, stdout, stderr) => {
+        if (error) {
+          console.error(`[webhook] Erreur new-site pour ${siteName} :`, error.message)
+          if (stderr) console.error(`[webhook] stderr:`, stderr)
+        } else {
+          console.log(`[webhook] new-site terminé pour ${siteName}`)
+          if (stdout) console.log(`[webhook] stdout:`, stdout)
+        }
+        resolve()
+      })
+    })
+  })
 
   return Response.json(
     { message: `Création de ${siteName} lancée`, site: siteName },
