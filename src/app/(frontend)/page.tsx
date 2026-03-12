@@ -11,7 +11,7 @@ export default async function HomePage() {
 
   let settings: Record<string, unknown> | null = null
   try {
-    settings = (await payload.findGlobal({ slug: 'site-settings' })) as Record<string, unknown>
+    settings = (await payload.findGlobal({ slug: 'site-settings' })) as unknown as Record<string, unknown>
   } catch {
     // Global inaccessible (migration non appliquée) — on utilise les valeurs par défaut
   }
