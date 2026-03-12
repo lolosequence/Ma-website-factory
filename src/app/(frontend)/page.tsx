@@ -1,12 +1,15 @@
 import { getPayload } from 'payload'
 import React from 'react'
+import Link from 'next/link'
 import config from '@/payload.config'
 import './styles.css'
+
+type Service = { id: string; icon: string; title: string; description?: string }
 
 export default async function HomePage() {
   const payload = await getPayload({ config: await config })
 
-  let settings: Record<string, any> | null = null
+  let settings: Record<string, unknown> | null = null
   try {
     settings = await payload.findGlobal({ slug: 'site-settings' })
   } catch {
@@ -52,7 +55,7 @@ export default async function HomePage() {
             <a href="#services">Services</a>
             <a href="#about">À propos</a>
             <a href="#contact">Contact</a>
-            <a href="/admin" className="nav-admin">Admin ↗</a>
+            <Link href="/admin" className="nav-admin">Admin ↗</Link>
           </nav>
         </div>
       </header>
@@ -72,7 +75,7 @@ export default async function HomePage() {
         <div className="container">
           <h2 className="section-title">Nos services</h2>
           <div className="services-grid">
-            {services.map((service: any) => (
+            {(services as Service[]).map((service) => (
               <div key={service.id} className="service-card">
                 <div className="service-icon">{service.icon}</div>
                 <h3 className="service-title">{service.title}</h3>
@@ -124,7 +127,7 @@ export default async function HomePage() {
             {!contactEmail && !contactPhone && !contactAddress && (
               <p className="contact-placeholder">
                 Renseignez vos coordonnées dans{' '}
-                <a href="/admin">l&apos;administration</a> →{' '}
+                <Link href="/admin">l&apos;administration</Link> →{' '}
                 <strong>Paramètres du site</strong>
               </p>
             )}
@@ -136,9 +139,9 @@ export default async function HomePage() {
       <footer className="site-footer">
         <div className="container footer-inner">
           <span>© {new Date().getFullYear()} {siteName}</span>
-          <a href="/admin" className="footer-admin-link">
+          <Link href="/admin" className="footer-admin-link">
             Gérer le site ↗
-          </a>
+          </Link>
         </div>
       </footer>
 
