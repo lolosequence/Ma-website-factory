@@ -2,16 +2,21 @@ import { getPayload } from 'payload'
 import React from 'react'
 import Link from 'next/link'
 import config from '@/payload.config'
+import type { SiteSettings } from '@/payload-types'
 import './styles.css'
 
-type Service = { id: string; icon: string; title: string; description?: string }
+const DEFAULT_SERVICES = [
+  { id: '1', icon: '⚡', title: 'Service 1', description: 'Décrivez ici votre premier service principal.' },
+  { id: '2', icon: '🎯', title: 'Service 2', description: 'Décrivez ici votre deuxième service principal.' },
+  { id: '3', icon: '💡', title: 'Service 3', description: 'Décrivez ici votre troisième service principal.' },
+]
 
 export default async function HomePage() {
   const payload = await getPayload({ config: await config })
 
-  let settings: Record<string, unknown> | null = null
+  let settings: SiteSettings | null = null
   try {
-    settings = (await payload.findGlobal({ slug: 'site-settings' })) as unknown as Record<string, unknown>
+    settings = await payload.findGlobal({ slug: 'site-settings' })
   } catch {
     // Global inaccessible (migration non appliquée) — on utilise les valeurs par défaut
   }
@@ -24,13 +29,7 @@ export default async function HomePage() {
     settings?.heroSubtitle ??
     'Nous vous accompagnons dans tous vos projets avec expertise et passion. Contactez-nous pour en savoir plus.'
   const heroCTA = settings?.heroCTA ?? 'Nous contacter'
-  const services = settings?.services?.length
-    ? settings.services
-    : [
-        { id: '1', icon: '⚡', title: 'Service 1', description: 'Décrivez ici votre premier service principal.' },
-        { id: '2', icon: '🎯', title: 'Service 2', description: 'Décrivez ici votre deuxième service principal.' },
-        { id: '3', icon: '💡', title: 'Service 3', description: 'Décrivez ici votre troisième service principal.' },
-      ]
+  const services = settings?.services?.length ? settings.services : DEFAULT_SERVICES
   const aboutTitle = settings?.aboutTitle ?? 'À propos de nous'
   const aboutText =
     settings?.aboutText ??
@@ -75,8 +74,8 @@ export default async function HomePage() {
         <div className="container">
           <h2 className="section-title">Nos services</h2>
           <div className="services-grid">
-            {(services as Service[]).map((service) => (
-              <div key={service.id} className="service-card">
+            {services.map((service) => (
+              <div key={service.id ?? service.title} className="service-card">
                 <div className="service-icon">{service.icon}</div>
                 <h3 className="service-title">{service.title}</h3>
                 {service.description && (
