@@ -5,6 +5,9 @@ import config from '@/payload.config'
 import type { SiteSettings } from '@/payload-types'
 import './styles.css'
 
+// La page lit la DB → ne jamais pré-rendre statiquement au build
+export const dynamic = 'force-dynamic'
+
 const DEFAULT_SERVICES = [
   { id: '1', icon: '⚡', title: 'Service 1', description: 'Décrivez ici votre premier service principal.' },
   { id: '2', icon: '🎯', title: 'Service 2', description: 'Décrivez ici votre deuxième service principal.' },
