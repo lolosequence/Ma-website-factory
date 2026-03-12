@@ -87,8 +87,12 @@ export interface Config {
     defaultIDType: number;
   };
   fallbackLocale: null;
-  globals: {};
-  globalsSelect: {};
+  globals: {
+    'site-settings': SiteSettings;
+  };
+  globalsSelect: {
+    'site-settings': SiteSettingsSelect<false> | SiteSettingsSelect<true>;
+  };
   locale: null;
   user: User;
   jobs: {
@@ -320,6 +324,60 @@ export interface Auth {
   [k: string]: unknown;
 }
 
+
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "site-settings".
+ */
+export interface SiteSettings {
+  id: number;
+  siteName?: string | null;
+  tagline?: string | null;
+  primaryColor?: string | null;
+  heroTitle?: string | null;
+  heroSubtitle?: string | null;
+  heroCTA?: string | null;
+  services?: {
+    icon?: string | null;
+    title: string;
+    description?: string | null;
+    id?: string | null;
+  }[] | null;
+  aboutTitle?: string | null;
+  aboutText?: string | null;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
+  contactAddress?: string | null;
+  updatedAt: string;
+  createdAt: string;
+  globalType?: string | null;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "site-settings_select".
+ */
+export interface SiteSettingsSelect<T extends boolean = true> {
+  siteName?: T;
+  tagline?: T;
+  primaryColor?: T;
+  heroTitle?: T;
+  heroSubtitle?: T;
+  heroCTA?: T;
+  services?: T | {
+    icon?: T;
+    title?: T;
+    description?: T;
+    id?: T;
+  };
+  aboutTitle?: T;
+  aboutText?: T;
+  contactEmail?: T;
+  contactPhone?: T;
+  contactAddress?: T;
+  updatedAt?: T;
+  createdAt?: T;
+  globalType?: T;
+}
 
 declare module 'payload' {
   export interface GeneratedTypes extends Config {}
